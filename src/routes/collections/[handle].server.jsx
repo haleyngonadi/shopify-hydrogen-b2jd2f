@@ -44,6 +44,7 @@ export default function Collection({collectionProductCount = 24, params}) {
       price.min = Number(searchParams.get('minPrice')) || 0;
       activeFilters.push({
         label: `Min: $${price.min}`,
+        name: 'minPrice',
         urlParam: {key: 'minPrice', value: searchParams.get('minPrice')},
       });
     }
@@ -51,6 +52,7 @@ export default function Collection({collectionProductCount = 24, params}) {
       price.max = Number(searchParams.get('maxPrice')) || 0;
       activeFilters.push({
         label: `Max: $${price.max}`,
+        name: 'maxPrice',
         urlParam: {key: 'maxPrice', value: searchParams.get('maxPrice')},
       });
     }
