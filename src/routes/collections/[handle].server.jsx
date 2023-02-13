@@ -1,30 +1,73 @@
 import {
+  Seo,
+  ShopifyAnalyticsConstants,
+  gql,
+  useServerAnalytics,
   useSession,
   useShop,
   useShopQuery,
-  Seo,
-  useServerAnalytics,
-  ShopifyAnalyticsConstants,
-  gql,
+  useUrl,
 } from '@shopify/hydrogen';
 
-import LoadMoreProducts from '../../components/LoadMoreProducts.client';
+import Facets from '../../components/Facets.client';
 import Layout from '../../components/Layout.server';
-import ProductCard from '../../components/ProductCard';
+import LoadMoreProducts from '../../components/LoadMoreProducts.client';
 import NotFound from '../../components/NotFound.server';
+import ProductCard from '../../components/ProductCard';
 
-export default function Collection({ collectionProductCount = 24, params }) {
-  const { languageCode } = useShop();
-  const { countryCode = 'US' } = useSession();
+export default function Collection({collectionProductCount = 24, params}) {
+  const {languageCode} = useShop();
+  const {countryCode = 'US'} = useSession();
 
-  const { handle } = params;
-  const { data } = useShopQuery({
+  const filters = [];
+  const activeFilters = [];
+
+  const location = useUrl();
+  const searchParams = new URLSearchParams(location.search);
+  const knownFilters = ['productVendor', 'productType'];
+  const variantOption = 'variantOption';
+  for (const [key, value] of searchParams.entries()) {
+    if (knownFilters.includes(key)) {
+      filters.push({[key]: value});
+      const name = key === 'productVendor' ? 'Vendor' : 'Product type';
+      activeFilters.push({label: value, name, urlParam: {key, value}});
+    } else if (key.includes(variantOption)) {
+      const [name, val] = value.split(':');
+      filters.push({variantOption: {name, value: val}});
+      activeFilters.push({label: val, name, urlParam: {key, value}});
+    }
+  }
+
+  if (searchParams.has('minPrice') || searchParams.has('maxPrice')) {
+    const price = {};
+    if (searchParams.has('minPrice')) {
+      price.min = Number(searchParams.get('minPrice')) || 0;
+      activeFilters.push({
+        label: `Min: $${price.min}`,
+        urlParam: {key: 'minPrice', value: searchParams.get('minPrice')},
+      });
+    }
+    if (searchParams.has('maxPrice')) {
+      price.max = Number(searchParams.get('maxPrice')) || 0;
+      activeFilters.push({
+        label: `Max: $${price.max}`,
+        urlParam: {key: 'maxPrice', value: searchParams.get('maxPrice')},
+      });
+    }
+    filters.push({
+      price,
+    });
+  }
+
+  const {handle} = params;
+  const {data} = useShopQuery({
     query: QUERY,
     variables: {
       handle,
       country: countryCode,
       language: languageCode,
       numProducts: collectionProductCount,
+      filters,
     },
     preload: true,
   });
@@ -37,7 +80,7 @@ export default function Collection({ collectionProductCount = 24, params }) {
             resourceId: data.collection.id,
           },
         }
-      : null
+      : null,
   );
 
   if (data?.collection == null) {
@@ -47,6 +90,9 @@ export default function Collection({ collectionProductCount = 24, params }) {
   const collection = data.collection;
   const products = collection.products.nodes;
   const hasNextPage = data.collection.products.pageInfo.hasNextPage;
+  const productFilters = data.collection.products.filters.filter((filter) =>
+    ['Price', 'Product type', 'Color'].includes(filter.label),
+  );
 
   return (
     <Layout>
@@ -56,12 +102,16 @@ export default function Collection({ collectionProductCount = 24, params }) {
         {collection.title}
       </h1>
       <div
-        dangerouslySetInnerHTML={{ __html: collection.descriptionHtml }}
+        dangerouslySetInnerHTML={{__html: collection.descriptionHtml}}
         className="text-lg"
       />
-      <p className="text-sm text-gray-500 mt-5 mb-5">
-        {products.length} {products.length > 1 ? 'products' : 'product'}
-      </p>
+      <div className="flex justify-between items-center w-full mt-5 mb-5 z-10 relative">
+        <Facets
+          filters={productFilters}
+          activeFilters={activeFilters}
+          productCount={products.length}
+        />
+      </div>
       <ul className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mb-16">
         {products.map((product) => (
           <li key={product.id}>
@@ -82,6 +132,7 @@ const QUERY = gql`
     $country: CountryCode
     $language: LanguageCode
     $numProducts: Int!
+    $filters: [ProductFilter!]
   ) @inContext(country: $country, language: $language) {
     collection(handle: $handle) {
       id
@@ -99,7 +150,18 @@ const QUERY = gql`
         height
         altText
       }
-      products(first: $numProducts) {
+      products(first: $numProducts, filters: $filters) {
+        filters {
+          id
+          label
+          type
+          values {
+            id
+            label
+            count
+            input
+          }
+        }
         nodes {
           id
           title
